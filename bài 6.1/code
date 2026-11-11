@@ -1,0 +1,530 @@
+///////Form1.cs
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace bai6._1
+{
+    public partial class Form1 : Form
+    {
+        private BUS bus = new BUS();
+        private List<ChiTietHoaDonDTO> gioHang = new List<ChiTietHoaDonDTO>();
+
+        public Form1()
+        {
+            InitializeComponent();
+        }
+
+        // 1. Khi mở Form lên thì tải toàn bộ dữ liệu
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            LoadDuLieu();
+        }
+
+        private void LoadDuLieu()
+        {
+            // Tải ComboBox Sản phẩm
+            cboSanPham.DataSource = bus.LayDanhSach("SanPham");
+            cboSanPham.DisplayMember = "TenSP";
+            cboSanPham.ValueMember = "MaSP";
+
+            // Tải ComboBox Khách hàng (Thêm dòng Khách lẻ ở đầu)
+            DataTable dtKH = bus.LayDanhSach("KhachHang");
+            DataRow rowKhachLe = dtKH.NewRow();
+            rowKhachLe["MaKH"] = DBNull.Value;
+            rowKhachLe["TenKH"] = "-- Khách lẻ --";
+            dtKH.Rows.InsertAt(rowKhachLe, 0);
+
+            cboKhachHang.DataSource = dtKH;
+            cboKhachHang.DisplayMember = "TenKH";
+            cboKhachHang.ValueMember = "MaKH";
+
+            // Tải bảng Quản lý Sản phẩm
+            dgvSanPham.DataSource = bus.LayDanhSach("SanPham");
+
+            // Tải Báo cáo Thống kê
+            lblDoanhThuNgay.Text = bus.LayDoanhThuNgay().ToString("N0") + " VNĐ";
+            lblDoanhThuThang.Text = bus.LayDoanhThuThang().ToString("N0") + " VNĐ";
+            dgvTop5.DataSource = bus.LayTop5SanPham();
+        }
+
+        // 2. Thêm sản phẩm vào giỏ hàng
+        private void btnThemGio_Click(object sender, EventArgs e)
+        {
+            if (cboSanPham.SelectedValue == null) return;
+
+            string maSP = cboSanPham.SelectedValue.ToString();
+            DataRowView row = (DataRowView)cboSanPham.SelectedItem;
+            string tenSP = row["TenSP"].ToString();
+            decimal donGia = Convert.ToDecimal(row["GiaBan"]);
+            int soLuong = (int)numSoLuong.Value;
+
+            if (soLuong <= 0)
+            {
+                MessageBox.Show("Số lượng phải lớn hơn 0!");
+                return;
+            }
+
+            var itemTonTai = gioHang.FirstOrDefault(x => x.MaSP == maSP);
+            if (itemTonTai != null)
+            {
+                itemTonTai.SoLuong += soLuong;
+            }
+            else
+            {
+                gioHang.Add(new ChiTietHoaDonDTO
+                {
+                    MaSP = maSP,
+                    TenSP = tenSP,
+                    DonGia = donGia,
+                    SoLuong = soLuong
+                });
+            }
+
+            CapNhatGioHang();
+        }
+
+        private void CapNhatGioHang()
+        {
+            dgvGioHang.DataSource = null;
+            dgvGioHang.DataSource = gioHang;
+            decimal tongTien = gioHang.Sum(x => x.ThanhTien);
+            lblTongTien.Text = tongTien.ToString("N0") + " VNĐ";
+        }
+
+
+        // 3. Nút Thanh Toán (Gọi Transaction)
+        private void btnThanhToan_Click(object sender, EventArgs e)
+        {
+            int maNV = 1; // Mặc định nhân viên số 1
+            int? maKH = cboKhachHang.SelectedValue == DBNull.Value ? (int?)null : Convert.ToInt32(cboKhachHang.SelectedValue);
+
+            string ketQua = bus.ThanhToan(maNV, maKH, gioHang);
+            MessageBox.Show(ketQua);
+
+            if (ketQua.Contains("thành công"))
+            {
+                gioHang.Clear();
+                CapNhatGioHang();
+                LoadDuLieu(); // Cập nhật lại tồn kho và doanh thu ngay lập tức
+            }
+        }
+
+        // 4. Các nút CRUD Quản lý Sản phẩm
+        private void btnThem_Click(object sender, EventArgs e)
+        {
+            SanPhamDTO sp = new SanPhamDTO
+            {
+                MaSP = txtMaSP.Text,
+                TenSP = txtTenSP.Text,
+                GiaBan = decimal.TryParse(txtGiaBan.Text, out decimal gia) ? gia : 0,
+                SoLuongTon = int.TryParse(txtSoLuongTon.Text, out int ton) ? ton : 0
+            };
+            MessageBox.Show(bus.ThemSanPham(sp));
+            LoadDuLieu();
+        }
+
+        private void btnSua_Click(object sender, EventArgs e)
+        {
+            SanPhamDTO sp = new SanPhamDTO
+            {
+                MaSP = txtMaSP.Text,
+                TenSP = txtTenSP.Text,
+                GiaBan = decimal.TryParse(txtGiaBan.Text, out decimal gia) ? gia : 0,
+                SoLuongTon = int.TryParse(txtSoLuongTon.Text, out int ton) ? ton : 0
+            };
+            MessageBox.Show(bus.SuaSanPham(sp));
+            LoadDuLieu();
+        }
+
+        private void btnXoa_Click(object sender, EventArgs e)
+        {
+            MessageBox.Show(bus.XoaSanPham(txtMaSP.Text));
+            LoadDuLieu();
+        }
+
+        private void btnTimKiem_Click(object sender, EventArgs e)
+        {
+            dgvSanPham.DataSource = bus.TimSanPham(txtTimKiem.Text);
+        }
+
+        // Click vào dòng trên bảng Sản phẩm thì hiện thông tin lên ô nhập
+        private void dgvSanPham_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                DataGridViewRow row = dgvSanPham.Rows[e.RowIndex];
+                txtMaSP.Text = row.Cells["MaSP"].Value.ToString();
+                txtTenSP.Text = row.Cells["TenSP"].Value.ToString();
+                txtGiaBan.Text = row.Cells["GiaBan"].Value.ToString();
+                txtSoLuongTon.Text = row.Cells["SoLuongTon"].Value.ToString();
+            }
+        }
+    }
+}
+
+
+
+
+
+/////////BUS.cs
+using System;
+using System.Collections.Generic;
+using System.Data;
+
+namespace bai6._1
+{
+    public class BUS
+    {
+        private DAL dal = new DAL();
+
+        public DataTable LayDanhSach(string tenBang) => dal.GetDanhSach(tenBang);
+        public DataTable TimSanPham(string kw) => dal.TimKiemSanPham(kw);
+
+        public string ThemSanPham(SanPhamDTO sp)
+        {
+            if (string.IsNullOrWhiteSpace(sp.MaSP) || string.IsNullOrWhiteSpace(sp.TenSP))
+                return "Mã và tên sản phẩm không được để trống!";
+            if (sp.GiaBan <= 0 || sp.SoLuongTon < 0)
+                return "Giá bán phải > 0 và tồn kho >= 0!";
+
+            return dal.ThemSanPham(sp) ? "Thêm thành công!" : "Thêm thất bại!";
+        }
+
+        public string SuaSanPham(SanPhamDTO sp)
+        {
+            if (string.IsNullOrWhiteSpace(sp.MaSP)) return "Vui lòng chọn sản phẩm cần sửa!";
+            return dal.SuaSanPham(sp) ? "Cập nhật thành công!" : "Cập nhật thất bại!";
+        }
+
+        public string XoaSanPham(string maSP)
+        {
+            if (string.IsNullOrWhiteSpace(maSP)) return "Vui lòng chọn sản phẩm cần xóa!";
+            return dal.XoaSanPham(maSP) ? "Xóa thành công!" : "Xóa thất bại (có thể sản phẩm đã có trong hóa đơn)!";
+        }
+
+        public string ThanhToan(int maNV, int? maKH, List<ChiTietHoaDonDTO> gioHang)
+        {
+            if (gioHang == null || gioHang.Count == 0)
+                return "Giỏ hàng đang trống!";
+
+            decimal tongTien = 0;
+            foreach (var item in gioHang) tongTien += item.ThanhTien;
+
+            if (dal.ThanhToanHoaDon(maNV, maKH, tongTien, gioHang, out string loi))
+                return "Thanh toán thành công! Đã trừ tồn kho và cộng điểm.";
+            else
+                return "Lỗi giao dịch (Đã Rollback): " + loi;
+        }
+
+        public decimal LayDoanhThuNgay() => dal.GetDoanhThuNgay();
+        public decimal LayDoanhThuThang() => dal.GetDoanhThuThang();
+        public DataTable LayTop5SanPham() => dal.GetTop5SanPham();
+    }
+}
+
+
+
+
+
+          
+//////DAL.cs
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.SqlClient;
+
+namespace bai6._1
+{
+    public class DAL
+    {
+        // Thay chuỗi kết nối này bằng Server Name của máy bạn
+        private string strConn = @"Data Source=DESKTOP-4HMO9V9\SQLEXPRESS;Initial Catalog=SalesDB;Integrated Security=True;TrustServerCertificate=True";
+
+
+        // Lấy dữ liệu cho ComboBox và DataGridView
+        public DataTable GetDanhSach(string tenBang)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                string sql = $"SELECT * FROM {tenBang}";
+                SqlDataAdapter da = new SqlDataAdapter(sql, conn);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                return dt;
+            }
+        }
+
+        // Tìm kiếm sản phẩm theo tên hoặc mã dùng SqlParameter có ký tự đại diện %
+        public DataTable TimKiemSanPham(string keyword)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                string sql = "SELECT * FROM SanPham WHERE TenSP LIKE @kw OR MaSP LIKE @kw";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@kw", "%" + keyword + "%");
+
+                SqlDataAdapter da = new SqlDataAdapter(cmd);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                return dt;
+            }
+        }
+
+        // Thêm Sản Phẩm
+        public bool ThemSanPham(SanPhamDTO sp)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "INSERT INTO SanPham (MaSP, TenSP, GiaBan, SoLuongTon) VALUES (@ma, @ten, @gia, @ton)";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ma", sp.MaSP);
+                cmd.Parameters.AddWithValue("@ten", sp.TenSP);
+                cmd.Parameters.AddWithValue("@gia", sp.GiaBan);
+                cmd.Parameters.AddWithValue("@ton", sp.SoLuongTon);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        // Sửa Sản Phẩm
+        public bool SuaSanPham(SanPhamDTO sp)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "UPDATE SanPham SET TenSP = @ten, GiaBan = @gia, SoLuongTon = @ton WHERE MaSP = @ma";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ma", sp.MaSP);
+                cmd.Parameters.AddWithValue("@ten", sp.TenSP);
+                cmd.Parameters.AddWithValue("@gia", sp.GiaBan);
+                cmd.Parameters.AddWithValue("@ton", sp.SoLuongTon);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        // Xóa Sản Phẩm
+        public bool XoaSanPham(string maSP)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "DELETE FROM SanPham WHERE MaSP = @ma";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ma", maSP);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        // Xử lý Thanh toán dùng SqlTransaction
+        public bool ThanhToanHoaDon(int maNV, int? maKH, decimal tongTien, List<ChiTietHoaDonDTO> gioHang, out string loi)
+        {
+            loi = "";
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                SqlTransaction trans = conn.BeginTransaction();
+
+                try
+                {
+                    string sqlHD = "INSERT INTO HoaDon (MaNV, MaKH, TongTien) OUTPUT INSERTED.MaHD VALUES (@maNV, @maKH, @tongTien)";
+                    SqlCommand cmdHD = new SqlCommand(sqlHD, conn, trans);
+                    cmdHD.Parameters.AddWithValue("@maNV", maNV);
+                    cmdHD.Parameters.AddWithValue("@maKH", (object)maKH ?? DBNull.Value);
+                    cmdHD.Parameters.AddWithValue("@tongTien", tongTien);
+                    int maHD = (int)cmdHD.ExecuteScalar();
+
+                    foreach (var item in gioHang)
+                    {
+                        string sqlCheck = "SELECT SoLuongTon FROM SanPham WHERE MaSP = @maSP";
+                        SqlCommand cmdCheck = new SqlCommand(sqlCheck, conn, trans);
+                        cmdCheck.Parameters.AddWithValue("@maSP", item.MaSP);
+                        int tonKho = (int)cmdCheck.ExecuteScalar();
+
+                        if (tonKho < item.SoLuong)
+                            throw new Exception($"Sản phẩm {item.TenSP} không đủ tồn kho (Còn: {tonKho})!");
+
+                        string sqlCT = "INSERT INTO ChiTietHoaDon (MaHD, MaSP, SoLuong, DonGia) VALUES (@maHD, @maSP, @sl, @gia)";
+                        SqlCommand cmdCT = new SqlCommand(sqlCT, conn, trans);
+                        cmdCT.Parameters.AddWithValue("@maHD", maHD);
+                        cmdCT.Parameters.AddWithValue("@maSP", item.MaSP);
+                        cmdCT.Parameters.AddWithValue("@sl", item.SoLuong);
+                        cmdCT.Parameters.AddWithValue("@gia", item.DonGia);
+                        cmdCT.ExecuteNonQuery();
+
+                        string sqlTru = "UPDATE SanPham SET SoLuongTon = SoLuongTon - @sl WHERE MaSP = @maSP";
+                        SqlCommand cmdTru = new SqlCommand(sqlTru, conn, trans);
+                        cmdTru.Parameters.AddWithValue("@sl", item.SoLuong);
+                        cmdTru.Parameters.AddWithValue("@maSP", item.MaSP);
+                        cmdTru.ExecuteNonQuery();
+                    }
+
+                    if (maKH.HasValue)
+                    {
+                        int diemCong = (int)(tongTien / 100000);
+                        if (diemCong > 0)
+                        {
+                            string sqlDiem = "UPDATE KhachHang SET DiemTichLuy = DiemTichLuy + @diem WHERE MaKH = @maKH";
+                            SqlCommand cmdDiem = new SqlCommand(sqlDiem, conn, trans);
+                            cmdDiem.Parameters.AddWithValue("@diem", diemCong);
+                            cmdDiem.Parameters.AddWithValue("@maKH", maKH.Value);
+                            cmdDiem.ExecuteNonQuery();
+                        }
+                    }
+
+                    trans.Commit();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    trans.Rollback();
+                    loi = ex.Message;
+                    return false;
+                }
+            }
+        }
+
+        // Thống kê doanh thu ngày dùng ExecuteScalar
+        public decimal GetDoanhThuNgay()
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "SELECT ISNULL(SUM(TongTien), 0) FROM HoaDon WHERE CAST(NgayLap AS DATE) = CAST(GETDATE() AS DATE)";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                return Convert.ToDecimal(cmd.ExecuteScalar());
+            }
+        }
+
+        // Thống kê doanh thu tháng dùng ExecuteScalar
+        public decimal GetDoanhThuThang()
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "SELECT ISNULL(SUM(TongTien), 0) FROM HoaDon WHERE MONTH(NgayLap) = MONTH(GETDATE()) AND YEAR(NgayLap) = YEAR(GETDATE())";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                return Convert.ToDecimal(cmd.ExecuteScalar());
+            }
+        }
+
+        // Lấy Top 5 sản phẩm bán chạy dùng SqlDataReader
+        public DataTable GetTop5SanPham()
+        {
+            DataTable dt = new DataTable();
+            dt.Columns.Add("MaSP");
+            dt.Columns.Add("TenSP");
+            dt.Columns.Add("TongBan", typeof(int));
+
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = @"SELECT TOP 5 sp.MaSP, sp.TenSP, SUM(ct.SoLuong) AS TongBan 
+                               FROM ChiTietHoaDon ct JOIN SanPham sp ON ct.MaSP = sp.MaSP 
+                               GROUP BY sp.MaSP, sp.TenSP ORDER BY TongBan DESC";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        dt.Rows.Add(reader["MaSP"], reader["TenSP"], reader["TongBan"]);
+                    }
+                }
+            }
+            return dt;
+        }
+    }
+}
+
+
+
+
+
+
+          
+//////DTO.cs
+using System;
+
+namespace bai6._1 // Chú ý đổi tên namespace cho khớp với project của bạn
+{
+    public class SanPhamDTO
+    {
+        public string MaSP { get; set; }
+        public string TenSP { get; set; }
+        public decimal GiaBan { get; set; }
+        public int SoLuongTon { get; set; }
+    }
+
+    public class ChiTietHoaDonDTO
+    {
+        public string MaSP { get; set; }
+        public string TenSP { get; set; }
+        public int SoLuong { get; set; }
+        public decimal DonGia { get; set; }
+        public decimal ThanhTien => SoLuong * DonGia;
+    }
+}
+
+
+
+
+
+
+
+///////code sql
+CREATE DATABASE SalesDB;
+GO
+USE SalesDB;
+GO
+
+-- 1. Bảng Nhân viên
+CREATE TABLE NhanVien (
+    MaNV INT IDENTITY(1,1) PRIMARY KEY,
+    TenNV NVARCHAR(100) NOT NULL,
+    SoDienThoai VARCHAR(15) UNIQUE,
+    ChucVu NVARCHAR(50)
+);
+
+-- 2. Bảng Khách hàng
+CREATE TABLE KhachHang (
+    MaKH INT IDENTITY(1,1) PRIMARY KEY,
+    TenKH NVARCHAR(100) NOT NULL,
+    DienThoai VARCHAR(15) UNIQUE,
+    DiemTichLuy INT DEFAULT 0
+);
+
+-- 3. Bảng Sản phẩm
+CREATE TABLE SanPham (
+    MaSP VARCHAR(20) PRIMARY KEY,
+    TenSP NVARCHAR(150) NOT NULL,
+    GiaBan DECIMAL(18,2) CHECK (GiaBan > 0),
+    SoLuongTon INT CHECK (SoLuongTon >= 0)
+);
+
+-- 4. Bảng Hóa đơn
+CREATE TABLE HoaDon (
+    MaHD INT IDENTITY(1,1) PRIMARY KEY,
+    NgayLap DATETIME DEFAULT GETDATE(),
+    MaNV INT FOREIGN KEY REFERENCES NhanVien(MaNV),
+    MaKH INT NULL FOREIGN KEY REFERENCES KhachHang(MaKH),
+    TongTien DECIMAL(18,2)
+);
+
+-- 5. Bảng Chi tiết hóa đơn
+CREATE TABLE ChiTietHoaDon (
+    MaHD INT FOREIGN KEY REFERENCES HoaDon(MaHD),
+    MaSP VARCHAR(20) FOREIGN KEY REFERENCES SanPham(MaSP),
+    SoLuong INT CHECK (SoLuong > 0),
+    DonGia DECIMAL(18,2),
+    PRIMARY KEY (MaHD, MaSP)
+);
+
+-- Thêm sẵn dữ liệu mẫu để khi mở Form lên là có hàng để bán ngay
+INSERT INTO NhanVien (TenNV, SoDienThoai, ChucVu) VALUES (N'Nguyễn Văn A', '0901234567', N'Thu ngân');
+INSERT INTO KhachHang (TenKH, DienThoai, DiemTichLuy) VALUES (N'Trần Thị B', '0987654321', 10);
+INSERT INTO SanPham (MaSP, TenSP, GiaBan, SoLuongTon) VALUES 
+('SP01', N'Nước ngọt Coca Cola', 10000, 50),
+('SP02', N'Bánh quy bơ Danisa', 120000, 20),
+('SP03', N'Mì tôm Hảo Hảo', 4500, 100);
