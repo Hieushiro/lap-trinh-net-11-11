@@ -1,0 +1,150 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using System.Windows.Forms;
+
+namespace bai6._2
+{
+    public partial class Form1 : Form
+    {
+        private BUS bus = new BUS();
+        // Biến lưu giữ Adapter và DataTable cho mô hình ngắt kết nối (Disconnected Model)
+        private SqlDataAdapter daChamCong;
+        private DataTable dtChamCong;
+
+        public Form1()
+        {
+            InitializeComponent();
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            // Nạp ComboBox Phòng ban
+            cboPhongBan.DataSource = bus.LayPhongBan();
+            cboPhongBan.DisplayMember = "TenPB";
+            cboPhongBan.ValueMember = "MaPB";
+
+            // Nạp ComboBox Lọc phòng ban (Thêm dòng Tất cả)
+            DataTable dtLoc = bus.LayPhongBan();
+            DataRow rAll = dtLoc.NewRow();
+            rAll["MaPB"] = 0;
+            rAll["TenPB"] = "-- Tất cả phòng ban --";
+            dtLoc.Rows.InsertAt(rAll, 0);
+            cboLocPhongBan.DataSource = dtLoc;
+            cboLocPhongBan.DisplayMember = "TenPB";
+            cboLocPhongBan.ValueMember = "MaPB";
+
+            LoadNhanVien();
+        }
+
+        private void LoadNhanVien()
+        {
+            int maPB = cboLocPhongBan.SelectedValue != null ? Convert.ToInt32(cboLocPhongBan.SelectedValue) : 0;
+            dgvNhanVien.DataSource = bus.TimNhanVien(txtTimKiem.Text, maPB);
+        }
+
+        // --- TAB 1: NHÂN SỰ ---
+        private void btnThem_Click(object sender, EventArgs e)
+        {
+            NhanVienDTO nv = new NhanVienDTO
+            {
+                HoTen = txtHoTen.Text,
+                NgaySinh = dtpNgaySinh.Value,
+                CCCD = txtCCCD.Text,
+                MaPB = Convert.ToInt32(cboPhongBan.SelectedValue),
+                LuongCoBan = decimal.TryParse(txtLuongCoBan.Text, out decimal l) ? l : 0,
+                HeSoLuong = double.TryParse(txtHeSoLuong.Text, out double h) ? h : 1.0
+            };
+            MessageBox.Show(bus.ThemNV(nv));
+            LoadNhanVien();
+        }
+
+        private void btnSua_Click(object sender, EventArgs e)
+        {
+            NhanVienDTO nv = new NhanVienDTO
+            {
+                MaNV = int.TryParse(txtMaNV.Text, out int ma) ? ma : 0,
+                HoTen = txtHoTen.Text,
+                NgaySinh = dtpNgaySinh.Value,
+                CCCD = txtCCCD.Text,
+                MaPB = Convert.ToInt32(cboPhongBan.SelectedValue),
+                LuongCoBan = decimal.TryParse(txtLuongCoBan.Text, out decimal l) ? l : 0,
+                HeSoLuong = double.TryParse(txtHeSoLuong.Text, out double h) ? h : 1.0
+            };
+            MessageBox.Show(bus.SuaNV(nv));
+            LoadNhanVien();
+        }
+
+        private void btnXoa_Click(object sender, EventArgs e)
+        {
+            int maNV = int.TryParse(txtMaNV.Text, out int ma) ? ma : 0;
+            MessageBox.Show(bus.XoaNV(maNV));
+            LoadNhanVien();
+        }
+
+        private void btnTimKiem_Click(object sender, EventArgs e)
+        {
+            LoadNhanVien();
+        }
+
+        private void dgvNhanVien_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex >= 0)
+            {
+                DataGridViewRow row = dgvNhanVien.Rows[e.RowIndex];
+                txtMaNV.Text = row.Cells["MaNV"].Value.ToString();
+                txtHoTen.Text = row.Cells["HoTen"].Value.ToString();
+                dtpNgaySinh.Value = Convert.ToDateTime(row.Cells["NgaySinh"].Value);
+                txtCCCD.Text = row.Cells["CCCD"].Value.ToString();
+                cboPhongBan.SelectedValue = row.Cells["MaPB"].Value;
+                txtLuongCoBan.Text = row.Cells["LuongCoBan"].Value.ToString();
+                txtHeSoLuong.Text = row.Cells["HeSoLuong"].Value.ToString();
+            }
+        }
+
+        // --- TAB 2: CHẤM CÔNG NGẮT KẾT NỐI ---
+        private void btnTaiChamCong_Click(object sender, EventArgs e)
+        {
+            dtChamCong = bus.LayBangChamCong(txtThangChamCong.Text.Trim(), out daChamCong);
+            dgvChamCong.DataSource = dtChamCong;
+
+            // Khóa không cho sửa các cột định danh và cột trạng thái
+            dgvChamCong.Columns["MaCong"].ReadOnly = true;
+            dgvChamCong.Columns["MaNV"].ReadOnly = true;
+            dgvChamCong.Columns["ThangNam"].ReadOnly = true;
+            dgvChamCong.Columns["DaChot"].ReadOnly = true;
+
+            // Nếu tháng đã chốt lương (DaChot = true) thì khóa toàn bộ lưới
+            bool daChot = dtChamCong.Rows.Count > 0 && Convert.ToBoolean(dtChamCong.Rows[0]["DaChot"]);
+            dgvChamCong.ReadOnly = daChot;
+            btnLuuChamCong.Enabled = !daChot;
+            if (daChot) MessageBox.Show("Tháng này đã chốt lương nên dữ liệu chấm công đã bị khóa!");
+        }
+
+        private void btnLuuChamCong_Click(object sender, EventArgs e)
+        {
+            if (dtChamCong == null || daChamCong == null) return;
+            dgvChamCong.EndEdit(); // Xác nhận dữ liệu vừa gõ trên ô lưới
+            MessageBox.Show(bus.LuuChamCongNgatKetNoi(dtChamCong, daChamCong));
+        }
+
+        // --- TAB 3: TÍNH LƯƠNG & CHỐT LƯƠNG ---
+        private void btnChotLuong_Click(object sender, EventArgs e)
+        {
+            string thang = txtThangLuong.Text.Trim();
+            MessageBox.Show(bus.ChotLuong(thang));
+            dgvBangLuong.DataSource = bus.LayBangLuong(thang);
+        }
+
+        private void btnXemLuong_Click(object sender, EventArgs e)
+        {
+            dgvBangLuong.DataSource = bus.LayBangLuong(txtThangLuong.Text.Trim());
+        }
+
+
+        private void label8_Click(object sender, EventArgs e)
+        {
+
+        }
+    }
+}
