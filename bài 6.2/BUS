@@ -1,0 +1,87 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+
+namespace bai6._2
+{
+    public class BUS
+    {
+        private DAL dal = new DAL();
+
+        public DataTable LayPhongBan() => dal.GetPhongBan();
+        public DataTable TimNhanVien(string kw, int maPB) => dal.TimKiemNhanVien(kw, maPB);
+
+        public string ThemNV(NhanVienDTO nv)
+        {
+            if (string.IsNullOrWhiteSpace(nv.HoTen) || string.IsNullOrWhiteSpace(nv.CCCD))
+                return "Họ tên và CCCD không được để trống!";
+            if (nv.LuongCoBan <= 0 || nv.HeSoLuong <= 0)
+                return "Lương cơ bản và hệ số lương phải lớn hơn 0!";
+            try
+            {
+                return dal.ThemNhanVien(nv) ? "Thêm nhân viên thành công!" : "Thêm thất bại!";
+            }
+            catch (Exception ex)
+            {
+                return "Lỗi (có thể trùng CCCD): " + ex.Message;
+            }
+        }
+
+        public string SuaNV(NhanVienDTO nv)
+        {
+            if (nv.MaNV <= 0) return "Vui lòng chọn nhân viên cần sửa/chuyển phòng!";
+            return dal.SuaNhanVien(nv) ? "Cập nhật hồ sơ / chuyển phòng ban thành công!" : "Cập nhật thất bại!";
+        }
+
+        public string XoaNV(int maNV)
+        {
+            if (maNV <= 0) return "Vui lòng chọn nhân viên cần xóa!";
+            try
+            {
+                return dal.XoaNhanVien(maNV) ? "Xóa thành công!" : "Xóa thất bại!";
+            }
+            catch
+            {
+                return "Không thể xóa nhân viên đã có dữ liệu chấm công hoặc bảng lương!";
+            }
+        }
+
+        public DataTable LayBangChamCong(string thangNam, out SqlDataAdapter adapter)
+        {
+            return dal.GetBangChamCong(thangNam, out adapter);
+        }
+
+        public string LuuChamCongNgatKetNoi(DataTable dtChamCong, SqlDataAdapter adapter)
+        {
+            try
+            {
+                // Kiểm tra số ngày công hợp lệ trước khi đồng bộ
+                foreach (DataRow row in dtChamCong.Rows)
+                {
+                    if (row.RowState != DataRowState.Deleted)
+                    {
+                        double ngayCong = Convert.ToDouble(row["SoNgayCong"]);
+                        if (ngayCong < 0 || ngayCong > 31)
+                            return "Số ngày công phải nằm trong khoảng từ 0 đến 31!";
+                    }
+                }
+                // Đồng bộ toàn bộ thay đổi trên lưới về SQL Server bằng 1 lệnh Update()
+                adapter.Update(dtChamCong);
+                return "Đã đồng bộ bảng chấm công về SQL Server thành công!";
+            }
+            catch (Exception ex)
+            {
+                return "Lỗi khi lưu chấm công: " + ex.Message;
+            }
+        }
+
+        public string ChotLuong(string thangNam)
+        {
+            if (dal.ChotLuongThang(thangNam, out string loi))
+                return $"Đã chốt lương tháng {thangNam} và khóa dữ liệu chấm công thành công!";
+            return "Lỗi chốt lương (Đã Rollback): " + loi;
+        }
+
+        public DataTable LayBangLuong(string thangNam) => dal.GetBangLuong(thangNam);
+    }
+}
