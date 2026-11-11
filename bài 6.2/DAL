@@ -1,0 +1,212 @@
+using System;
+using System.Data;
+using System.Data.SqlClient;
+
+namespace bai6._2
+{
+    public class DAL
+    {
+        private string strConn = @"Data Source=DESKTOP-4HMO9V9\SQLEXPRESS;Initial Catalog=HRMDB;Integrated Security=True;TrustServerCertificate=True";
+
+        // 1. Lấy danh sách Phòng ban
+        public DataTable GetPhongBan()
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                SqlDataAdapter da = new SqlDataAdapter("SELECT * FROM PhongBan", conn);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                return dt;
+            }
+        }
+
+        // 2. Lấy & Tìm kiếm Nhân viên (Theo Tên, Phòng ban hoặc CCCD bằng SqlParameter)
+        public DataTable TimKiemNhanVien(string keyword, int maPB)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                string sql = @"SELECT nv.MaNV, nv.HoTen, nv.NgaySinh, nv.CCCD, nv.MaPB, pb.TenPB, nv.LuongCoBan, nv.HeSoLuong 
+                               FROM NhanVien nv JOIN PhongBan pb ON nv.MaPB = pb.MaPB 
+                               WHERE (nv.HoTen LIKE @kw OR nv.CCCD LIKE @kw)";
+                if (maPB > 0) sql += " AND nv.MaPB = @maPB";
+
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@kw", "%" + keyword + "%");
+                if (maPB > 0) cmd.Parameters.AddWithValue("@maPB", maPB);
+
+                SqlDataAdapter da = new SqlDataAdapter(cmd);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                return dt;
+            }
+        }
+
+        // 3. CRUD Nhân viên & Chuyển phòng ban
+        public bool ThemNhanVien(NhanVienDTO nv)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "INSERT INTO NhanVien (HoTen, NgaySinh, CCCD, MaPB, LuongCoBan, HeSoLuong) VALUES (@ten, @ns, @cccd, @pb, @luong, @hsl)";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ten", nv.HoTen);
+                cmd.Parameters.AddWithValue("@ns", nv.NgaySinh);
+                cmd.Parameters.AddWithValue("@cccd", nv.CCCD);
+                cmd.Parameters.AddWithValue("@pb", nv.MaPB);
+                cmd.Parameters.AddWithValue("@luong", nv.LuongCoBan);
+                cmd.Parameters.AddWithValue("@hsl", nv.HeSoLuong);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        public bool SuaNhanVien(NhanVienDTO nv)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "UPDATE NhanVien SET HoTen=@ten, NgaySinh=@ns, CCCD=@cccd, MaPB=@pb, LuongCoBan=@luong, HeSoLuong=@hsl WHERE MaNV=@ma";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ma", nv.MaNV);
+                cmd.Parameters.AddWithValue("@ten", nv.HoTen);
+                cmd.Parameters.AddWithValue("@ns", nv.NgaySinh);
+                cmd.Parameters.AddWithValue("@cccd", nv.CCCD);
+                cmd.Parameters.AddWithValue("@pb", nv.MaPB);
+                cmd.Parameters.AddWithValue("@luong", nv.LuongCoBan);
+                cmd.Parameters.AddWithValue("@hsl", nv.HeSoLuong);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        public bool XoaNhanVien(int maNV)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                string sql = "DELETE FROM NhanVien WHERE MaNV = @ma";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@ma", maNV);
+                return cmd.ExecuteNonQuery() > 0;
+            }
+        }
+
+        // 4. MÔ HÌNH NGẮT KẾT NỐI: Nạp bảng chấm công theo Tháng/Năm
+        public DataTable GetBangChamCong(string thangNam, out SqlDataAdapter adapter)
+        {
+            SqlConnection conn = new SqlConnection(strConn);
+            conn.Open();
+
+            // Tự động khởi tạo dòng chấm công cho các nhân viên chưa có trong tháng này
+            string sqlInit = @"INSERT INTO BangChamCong (MaNV, ThangNam, SoNgayCong, SoGioOT, DaChot)
+                               SELECT MaNV, @thang, 22, 0, 0 FROM NhanVien 
+                               WHERE MaNV NOT IN (SELECT MaNV FROM BangChamCong WHERE ThangNam = @thang)";
+            SqlCommand cmdInit = new SqlCommand(sqlInit, conn);
+            cmdInit.Parameters.AddWithValue("@thang", thangNam);
+            cmdInit.ExecuteNonQuery();
+
+            // Truy vấn 1 bảng duy nhất để SqlCommandBuilder hoạt động tự động
+            string sqlSelect = "SELECT MaCong, MaNV, ThangNam, SoNgayCong, SoGioOT, DaChot FROM BangChamCong WHERE ThangNam = @thang";
+            SqlCommand cmdSelect = new SqlCommand(sqlSelect, conn);
+            cmdSelect.Parameters.AddWithValue("@thang", thangNam);
+
+            adapter = new SqlDataAdapter(cmdSelect);
+            SqlCommandBuilder builder = new SqlCommandBuilder(adapter); // Tự sinh lệnh Update/Insert/Delete
+
+            DataTable dt = new DataTable();
+            adapter.Fill(dt);
+            conn.Close();
+            return dt;
+        }
+
+        // 5. TÍNH LƯƠNG & CHỐT LƯƠNG BẰNG SQLTRANSACTION
+        public bool ChotLuongThang(string thangNam, out string loi)
+        {
+            loi = "";
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                conn.Open();
+                SqlTransaction trans = conn.BeginTransaction();
+
+                try
+                {
+                    // Kiểm tra xem tháng này đã chốt lương chưa
+                    string sqlCheck = "SELECT COUNT(*) FROM BangLuong WHERE ThangNam = @thang";
+                    SqlCommand cmdCheck = new SqlCommand(sqlCheck, conn, trans);
+                    cmdCheck.Parameters.AddWithValue("@thang", thangNam);
+                    if ((int)cmdCheck.ExecuteScalar() > 0)
+                        throw new Exception($"Tháng {thangNam} đã chốt lương trước đó rồi!");
+
+                    // Lấy dữ liệu nhân viên + chấm công để tính lương
+                    string sqlGet = @"SELECT nv.MaNV, nv.LuongCoBan, nv.HeSoLuong, cc.SoNgayCong, cc.SoGioOT 
+                                      FROM NhanVien nv JOIN BangChamCong cc ON nv.MaNV = cc.MaNV 
+                                      WHERE cc.ThangNam = @thang";
+                    SqlCommand cmdGet = new SqlCommand(sqlGet, conn, trans);
+                    cmdGet.Parameters.AddWithValue("@thang", thangNam);
+
+                    DataTable dtTinhLuong = new DataTable();
+                    using (SqlDataReader reader = cmdGet.ExecuteReader())
+                    {
+                        dtTinhLuong.Load(reader);
+                    }
+
+                    if (dtTinhLuong.Rows.Count == 0)
+                        throw new Exception("Chưa có dữ liệu chấm công cho tháng này!");
+
+                    // Ghi nhận vào BangLuong theo đúng công thức đề bài
+                    string sqlInsertLuong = "INSERT INTO BangLuong (MaNV, ThangNam, ThucLinh) VALUES (@maNV, @thang, @thucLinh)";
+                    foreach (DataRow row in dtTinhLuong.Rows)
+                    {
+                        int maNV = Convert.ToInt32(row["MaNV"]);
+                        decimal luongCB = Convert.ToDecimal(row["LuongCoBan"]);
+                        double hsl = Convert.ToDouble(row["HeSoLuong"]);
+                        double ngayCong = Convert.ToDouble(row["SoNgayCong"]);
+                        double gioOT = Convert.ToDouble(row["SoGioOT"]);
+
+                        // Công thức: ThucLinh = (LuongCoBan * HeSoLuong / 22) * SoNgayCong + (SoGioOT * 50000)
+                        decimal thucLinh = ((luongCB * (decimal)hsl / 22m) * (decimal)ngayCong) + ((decimal)gioOT * 50000m);
+
+                        SqlCommand cmdIns = new SqlCommand(sqlInsertLuong, conn, trans);
+                        cmdIns.Parameters.AddWithValue("@maNV", maNV);
+                        cmdIns.Parameters.AddWithValue("@thang", thangNam);
+                        cmdIns.Parameters.AddWithValue("@thucLinh", Math.Round(thucLinh, 0));
+                        cmdIns.ExecuteNonQuery();
+                    }
+
+                    // Khóa dữ liệu chấm công của tháng đó
+                    string sqlLock = "UPDATE BangChamCong SET DaChot = 1 WHERE ThangNam = @thang";
+                    SqlCommand cmdLock = new SqlCommand(sqlLock, conn, trans);
+                    cmdLock.Parameters.AddWithValue("@thang", thangNam);
+                    cmdLock.ExecuteNonQuery();
+
+                    trans.Commit();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    trans.Rollback();
+                    loi = ex.Message;
+                    return false;
+                }
+            }
+        }
+
+        // Xem bảng lương đã chốt
+        public DataTable GetBangLuong(string thangNam)
+        {
+            using (SqlConnection conn = new SqlConnection(strConn))
+            {
+                string sql = @"SELECT bl.MaLuong, nv.MaNV, nv.HoTen, pb.TenPB, nv.LuongCoBan, nv.HeSoLuong, cc.SoNgayCong, cc.SoGioOT, bl.ThucLinh 
+                               FROM BangLuong bl 
+                               JOIN NhanVien nv ON bl.MaNV = nv.MaNV 
+                               JOIN PhongBan pb ON nv.MaPB = pb.MaPB
+                               JOIN BangChamCong cc ON bl.MaNV = cc.MaNV AND bl.ThangNam = cc.ThangNam
+                               WHERE bl.ThangNam = @thang";
+                SqlCommand cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@thang", thangNam);
+                SqlDataAdapter da = new SqlDataAdapter(cmd);
+                DataTable dt = new DataTable();
+                da.Fill(dt);
+                return dt;
+            }
+        }
+    }
+}
